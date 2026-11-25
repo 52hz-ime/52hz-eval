@@ -1,0 +1,32 @@
+{
+  "sources_file": "sources.json",
+  "extract": [
+    {
+      "source": "lccc_base",
+      "input": "../raw/lccc_base",
+      "output": "../build/lccc-base.jsonl",
+      "manifest": "../build/lccc-base.manifest.json",
+      "min_chars": 4,
+      "max_chars": 160
+    },
+    {
+      "source": "clue_corpus_small",
+      "input": "../raw/clue_corpus_small",
+      "output": "../build/comments2019zh.jsonl",
+      "manifest": "../build/comments2019zh.manifest.json",
+      "min_chars": 4,
+      "max_chars": 160
+    }
+  ],
+  "sample": {
+    "inputs": [
+      "../build/lccc-base.jsonl",
+      "../build/comments2019zh.jsonl"
+    ],
+    "output": "../build/benchmark-clean.jsonl",
+    "count": 5000,
+    "seed": 52,
+    "split": "dev",
+    "manifest": "../build/benchmark-clean.manifest.json"
+  }
+}

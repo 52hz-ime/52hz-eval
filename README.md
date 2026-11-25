@@ -16,10 +16,94 @@
 
 ## 数据原则
 
-- 优先使用公开、可授权或合成数据。
-- 不提交未经授权的原始用户输入。
-- 每个数据集记录来源、许可证和脱敏规则。
-- 模型变更必须通过固定回归集验证。
+- 优先使用简体中文的日常对话、帖子、评论和新闻。
+- Wikipedia 只作为少量风格对照，不作为主数据来源。
+- 每个来源都登记在 `data/sources.json`，记录稳定 ID、来源页面、数据 artifact、格式、字段、推荐占比和使用优先级。
+- 原始下载文件放在本地 `raw/`，清洗结果放在 `build/`；这两个目录不进入 Git。
+- 所有抽取、清洗、去重和采样都由标准库脚本完成，并保存随机种子、抽取器版本和 manifest。
+
+## 可复用 workflow
+
+下载来源使用索引里的 Hugging Face 文件清单，默认检查并下载全部已登记来源：
+
+```sh
+make download
+```
+
+选择多个来源或全部来源：
+
+```sh
+make download SOURCES=lccc_base,kdconv
+make download SOURCES=all
+```
+
+每个文件都会先检查 `raw/<source-id>/` 下是否已有完整文件；完整文件打印“已有，跳过”，中断文件保留为 `.part` 并在下次继续。输出包含来源序号、文件序号、当前文件名、下载完成状态和最终汇总。CLUECorpusSmall、THUCNews 等文件较大，下载前应确认磁盘空间；没有自动入口的来源会明确打印 `manual`，不会伪装成已下载。
+
+先查看来源索引：
+
+```sh
+make sources
+```
+
+对一个原始文本、JSON、JSONL 文件或目录做统一抽取。普通 JSONL 来源的字段由 `data/sources.json` 中的 `text_fields`、`context_fields` 和 `id_fields` 指定；对话来源用 `turns_field` 展开每个 turn，并把此前 turn 作为上下文；若来源是 tokenized 文本，可配置 `join_tokens` 去除分词空格。纯文本来源按行处理：
+
+```sh
+python3 -m tools.corpus_workflow extract \
+  --source lccc_base \
+  --input raw/lccc_base \
+  --output build/lccc-base.jsonl \
+  --min-chars 4 --max-chars 160 \
+  --manifest build/lccc-base.manifest.json
+```
+
+抽取阶段会做 Unicode NFC、控制字符清理、空白归一化、中文存在性过滤、长度过滤和同来源精确去重；不会把中文全角标点转换成半角，并写出统一记录：
+
+```json
+{
+  "id": "lccc_base:...",
+  "source_id": "lccc_base",
+  "source_record_id": "...",
+  "text": "目标句子",
+  "context": "可选上下文",
+  "source_url": "...",
+  "source_script": "simplified",
+  "extractor_version": "0.1.0"
+}
+```
+
+合并多个来源并确定性采样：
+
+```sh
+python3 -m tools.corpus_workflow sample \
+  --input build/lccc-base.jsonl build/comments2019zh.jsonl \
+  --output build/benchmark-clean.jsonl \
+  --count 5000 --seed 52 --split dev \
+  --manifest build/benchmark-clean.manifest.json
+```
+
+查看来源和长度分布：
+
+```sh
+python3 -m tools.corpus_workflow stats --input build/benchmark-clean.jsonl
+```
+
+完整流程可以写入 `data/pipeline.example.json`，然后运行：
+
+```sh
+python3 -m tools.corpus_workflow run --config data/pipeline.example.json
+```
+
+配置中的路径相对于配置文件所在目录解析。`run` 先执行所有抽取任务，再执行最终采样；同一个配置和 seed 应产生相同输出。采样 manifest 会记录输入文件、输出文件、请求数量、实际数量、来源分布和 seed。
+
+## 后续阶段
+
+当前 workflow 只负责原始语料到干净基础句的可复现处理。拼音生成、漏键/邻键/交换/截断等噪声变体，以及 `preview`、`commit`、`ask` 交互标签，放在下一层 generator 中，输入应是这里输出的统一 JSONL，而不是重新读取各个来源的原始格式。
+
+运行离线测试：
+
+```sh
+make test
+```
 
 ## 状态
 

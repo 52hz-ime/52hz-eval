@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "default_script": "simplified",
+  "sources": [
+    {
+      "id": "lccc_base",
+      "name": "LCCC-base",
+      "family": "conversation",
+      "priority": 1,
+      "recommended_share": 0.25,
+      "artifacts": ["LCCC-base"],
+      "script": "simplified",
+      "url": "https://github.com/thu-coai/CDial-GPT",
+      "format": "jsonl",
+      "download": {
+        "kind": "hf",
+        "repo": "silver/lccc",
+        "include": ["lccc_base_train.jsonl.gz", "lccc_base_valid.jsonl.gz", "lccc_base_test.jsonl.gz"]
+      },
+      "turns_field": "dialog",
+      "turn_text_fields": ["message", "content", "text"],
+      "join_tokens": true,
+      "text_fields": [],
+      "context_fields": [],
+      "id_fields": ["id", "conversation_id"]
+    },
+    {
+      "id": "lccc_large",
+      "name": "LCCC-large",
+      "family": "conversation",
+      "priority": 2,
+      "recommended_share": 0.15,
+      "artifacts": ["LCCC-large"],
+      "script": "simplified",
+      "url": "https://github.com/thu-coai/CDial-GPT",
+      "format": "jsonl",
+      "download": {
+        "kind": "hf",
+        "repo": "silver/lccc",
+        "include": ["lccc_large.jsonl.gz"]
+      },
+      "turns_field": "dialog",
+      "turn_text_fields": ["message", "content", "text"],
+      "join_tokens": true,
+      "text_fields": [],
+      "context_fields": [],
+      "id_fields": ["id", "conversation_id"]
+    },
+    {
+      "id": "clue_corpus_small",
+      "name": "CLUECorpusSmall",
+      "family": "web_and_news",
+      "priority": 1,
+      "recommended_share": 0.25,
+      "artifacts": ["comments2019zh", "webText2019zh", "news2016zh"],
+      "script": "simplified",
+      "url": "https://github.com/CLUEbenchmark/CLUECorpus2020",
+      "format": "text",
+      "download": {
+        "kind": "hf",
+        "repo": "austenjs/ClueCorpusSmallDataset",
+        "include": ["CLUECorpusSmall.txt"]
+      },
+      "text_fields": [],
+      "context_fields": [],
+      "id_fields": []
+    },
+    {
+      "id": "thucnews",
+      "name": "THUCNews",
+      "family": "news",
+      "priority": 2,
+      "recommended_share": 0.2,
+      "artifacts": ["THUCNews"],
+      "script": "simplified",
+      "url": "http://thuctc.thunlp.org",
+      "format": "jsonl",
+      "text_fields": ["content", "text", "title"],
+      "id_fields": ["id", "title"],
+      "download": {
+        "kind": "hf",
+        "repo": "Tongjilibo/THUCNews",
+        "include": ["*.jsonl"]
+      },
+      "context_fields": []
+    },
+    {
+      "id": "kdconv",
+      "name": "KdConv",
+      "family": "conversation",
+      "priority": 2,
+      "recommended_share": 0.1,
+      "artifacts": ["movie", "music", "travel"],
+      "script": "simplified",
+      "url": "https://coai.cs.tsinghua.edu.cn/tools/5",
+      "format": "json",
+      "download": {
+        "kind": "hf",
+        "repo": "thu-coai/kdconv",
+        "include": [
+          "film/train.json", "film/dev.json", "film/test.json",
+          "music/train.json", "music/dev.json", "music/test.json",
+          "travel/train.json", "travel/dev.json", "travel/test.json"
+        ]
+      },
+      "turns_field": "messages",
+      "turn_text_fields": ["message", "content", "text"],
+      "text_fields": [],
+      "context_fields": ["history", "context"],
+      "id_fields": ["id", "conversation_id"]
+    },
+    {
+      "id": "wikipedia_zh_control",
+      "name": "Chinese Wikipedia control",
+      "family": "encyclopedic",
+      "priority": 3,
+      "recommended_share": 0.05,
+      "artifacts": ["zhwiki"],
+      "script": "mixed",
+      "url": "https://dumps.wikimedia.org/zhwiki/",
+      "format": "text",
+      "download": {
+        "kind": "manual",
+        "instructions": "从 Wikimedia dump 下载 zhwiki，再解压到 raw/wikipedia_zh_control/。"
+      },
+      "text_fields": [],
+      "context_fields": [],
+      "id_fields": []
+    }
+  ]
+}
