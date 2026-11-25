@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.corpus_workflow import extract, load_index, sample, stats
+from tools.corpus_workflow import extract, extract_chunks, load_index, sample, stats
 
 
 class CorpusWorkflowTests(unittest.TestCase):
@@ -25,6 +25,7 @@ class CorpusWorkflowTests(unittest.TestCase):
             self.assertEqual(records[0]["text"], "明天 开会。")
             self.assertEqual(records[0]["context"], "上文")
             self.assertEqual(records[0]["source_record_id"], "a")
+            self.assertEqual(records[0]["quality_policy"], "manual_review")
             self.assertEqual(list(json.loads(line)["id"] for line in output.read_text(encoding="utf-8").splitlines()),
                              [records[0]["id"]])
 
@@ -102,3 +103,29 @@ class CorpusWorkflowTests(unittest.TestCase):
             records = extract({"id": "gzip", "format": "jsonl", "text_fields": ["text"]},
                               compressed, root / "gzip-out.jsonl", min_chars=2)
             self.assertEqual([row["text"] for row in records], ["压缩输入"])
+
+    def test_sentence_source_splits_long_documents_and_keeps_group_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "news.jsonl"
+            source.write_text(json.dumps({"id": "n1", "title": "新闻标题", "content": "第一句。第二句！第三句"},
+                                         ensure_ascii=False) + "\n", encoding="utf-8")
+            records = extract({"id": "news", "format": "jsonl", "split": "sentences",
+                               "text_fields": ["content"], "context_fields": ["title"], "id_fields": ["id"]},
+                              source, root / "news-out.jsonl", min_chars=2, max_chars=20)
+            self.assertEqual([row["text"] for row in records], ["第一句。", "第二句！", "第三句"])
+            self.assertEqual({row["group_id"] for row in records}, {"n1"})
+            self.assertTrue(all(row["context"] == "新闻标题" for row in records))
+
+    def test_staging_chunks_are_uncompressed_and_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.txt"
+            source.write_text("第一句。\n第二句。\n第三句。\n", encoding="utf-8")
+            result = extract_chunks({"id": "demo", "format": "text", "script": "simplified",
+                                     "quality_policy": "editorial"}, source, root / "staging",
+                                    min_chars=2, max_chars=20, chunk_bytes=180)
+            self.assertEqual(result["records"], 3)
+            self.assertGreater(len(result["files"]), 1)
+            self.assertTrue(all(path.endswith(".jsonl") for path in result["files"]))
+            self.assertTrue(all("\x1f\x8b" not in Path(path).read_bytes()[:2].decode("latin1") for path in result["files"]))

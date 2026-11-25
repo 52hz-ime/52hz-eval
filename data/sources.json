@@ -9,6 +9,7 @@
       "priority": 1,
       "recommended_share": 0.25,
       "artifacts": ["LCCC-base"],
+      "quality_policy": "manual_review",
       "script": "simplified",
       "url": "https://github.com/thu-coai/CDial-GPT",
       "format": "jsonl",
@@ -31,6 +32,7 @@
       "priority": 2,
       "recommended_share": 0.15,
       "artifacts": ["LCCC-large"],
+      "quality_policy": "manual_review",
       "script": "simplified",
       "url": "https://github.com/thu-coai/CDial-GPT",
       "format": "jsonl",
@@ -53,6 +55,7 @@
       "priority": 1,
       "recommended_share": 0.25,
       "artifacts": ["comments2019zh", "webText2019zh", "news2016zh"],
+      "quality_policy": "mixed_review",
       "script": "simplified",
       "url": "https://github.com/CLUEbenchmark/CLUECorpus2020",
       "format": "text",
@@ -72,9 +75,11 @@
       "priority": 2,
       "recommended_share": 0.2,
       "artifacts": ["THUCNews"],
+      "quality_policy": "editorial",
       "script": "simplified",
       "url": "http://thuctc.thunlp.org",
       "format": "jsonl",
+      "split": "sentences",
       "text_fields": ["content", "text", "title"],
       "id_fields": ["id", "title"],
       "download": {
@@ -82,7 +87,7 @@
         "repo": "Tongjilibo/THUCNews",
         "include": ["*.jsonl"]
       },
-      "context_fields": []
+      "context_fields": ["title"]
     },
     {
       "id": "kdconv",
@@ -91,6 +96,7 @@
       "priority": 2,
       "recommended_share": 0.1,
       "artifacts": ["movie", "music", "travel"],
+      "quality_policy": "manual_review",
       "script": "simplified",
       "url": "https://coai.cs.tsinghua.edu.cn/tools/5",
       "format": "json",
@@ -116,6 +122,7 @@
       "priority": 3,
       "recommended_share": 0.05,
       "artifacts": ["zhwiki"],
+      "quality_policy": "editorial",
       "script": "mixed",
       "url": "https://dumps.wikimedia.org/zhwiki/",
       "format": "text",

@@ -1,5 +1,7 @@
 raw/
 build/
+.venv/
+*.egg-info/
 *.part
 __pycache__/
 tests/__pycache__/

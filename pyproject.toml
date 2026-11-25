@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "52hz-eval"
+version = "0.1.0"
+description = "Corpus extraction and noisy Chinese IME benchmark generation"
+requires-python = ">=3.8"
+dependencies = [
+  "pypinyin==0.53.0",
+]
+
+[project.scripts]
+52hz-corpus = "tools.corpus_workflow:main"
+52hz-download = "tools.download_sources:main"
+52hz-pinyin = "tools.pinyin_cases:main"
+52hz-benchmark = "tools.benchmark_pipeline:main"
+
+[tool.setuptools]
+packages = ["tools"]

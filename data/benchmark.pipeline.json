@@ -1,0 +1,23 @@
+{
+  "sources_file": "sources.json",
+  "extract": [
+    {
+      "source": "thucnews",
+      "input": "../raw/thucnews",
+      "staging_dir": "../build/staging/thucnews",
+      "manifest": "../build/staging/thucnews.manifest.json",
+      "min_chars": 4,
+      "max_chars": 160,
+      "limit": 5000,
+      "chunk_bytes": 67108864
+    }
+  ],
+  "sample": {
+    "inputs": [],
+    "output": "../build/clean.jsonl",
+    "count": 5000,
+    "seed": 52,
+    "split": "dev",
+    "manifest": "../build/clean.manifest.json"
+  }
+}

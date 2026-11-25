@@ -13,9 +13,12 @@ from pathlib import Path
 
 
 EXTRACTOR_VERSION = "0.1.0"
+STAGING_SCHEMA = "staging.v1"
+DEFAULT_CHUNK_BYTES = 64 * 1024 * 1024
 CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 CONTROL = re.compile(r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]")
 SPACE = re.compile(r"\s+")
+SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?；;…])(?=[^。！？!?；;…])|[\r\n]+")
 
 
 def load_index(path):
@@ -85,6 +88,12 @@ def join_field(row, fields, join_tokens=False):
     return "\n".join(values)
 
 
+def split_units(value, mode=""):
+    if mode != "sentences":
+        return [value]
+    return [part.strip() for part in SENTENCE_SPLIT.split(value) if part.strip()]
+
+
 def iter_input(path, fmt):
     path = Path(path)
     files = sorted(item for item in path.rglob("*") if item.is_file() and not item.name.startswith(".") and
@@ -133,6 +142,22 @@ def stable_id(source_id, source_record_id, text):
     return f"{source_id}:{digest}"
 
 
+def make_record(source_spec, source_record_id, text, context):
+    return {
+        "schema_version": STAGING_SCHEMA,
+        "id": stable_id(source_spec["id"], source_record_id, text),
+        "source_id": source_spec["id"],
+        "source_record_id": source_record_id,
+        "group_id": source_record_id.split(":turn-", 1)[0].split(":part-", 1)[0],
+        "text": text,
+        "context": context,
+        "source_url": source_spec.get("url", ""),
+        "source_script": source_spec.get("script", "unknown"),
+        "quality_policy": source_spec.get("quality_policy", "manual_review"),
+        "extractor_version": EXTRACTOR_VERSION,
+    }
+
+
 def turn_candidates(row, source_spec, location):
     if isinstance(row, str):
         yield normalize(row, source_spec.get("join_tokens", False)), "", location
@@ -160,7 +185,10 @@ def turn_candidates(row, source_spec, location):
     text = normalize(values[0], source_spec.get("join_tokens", False)) if values else ""
     context = join_field(row, source_spec.get("context_fields", []), source_spec.get("join_tokens", False))
     ids = first_field(row, source_spec.get("id_fields", []))
-    yield text, context, normalize(ids[0]) if ids else location
+    base_id = normalize(ids[0]) if ids else location
+    for index, part in enumerate(split_units(text, source_spec.get("split", ""))):
+        source_record_id = base_id if index == 0 and len(split_units(text, source_spec.get("split", ""))) == 1 else f"{base_id}:part-{index}"
+        yield part, context, source_record_id
 
 
 def extract(source_spec, input_path, output_path, min_chars=4, max_chars=240, limit=None, manifest_path=None):
@@ -175,16 +203,7 @@ def extract(source_spec, input_path, output_path, min_chars=4, max_chars=240, li
             if key in seen:
                 continue
             seen.add(key)
-            records.append({
-                "id": stable_id(source_spec["id"], source_record_id, text),
-                "source_id": source_spec["id"],
-                "source_record_id": source_record_id,
-                "text": text,
-                "context": context,
-                "source_url": source_spec.get("url", ""),
-                "source_script": source_spec.get("script", "unknown"),
-                "extractor_version": EXTRACTOR_VERSION,
-            })
+            records.append(make_record(source_spec, source_record_id, text, context))
             if limit and len(records) >= limit:
                 break
         if limit and len(records) >= limit:
@@ -205,6 +224,57 @@ def extract(source_spec, input_path, output_path, min_chars=4, max_chars=240, li
             "records": len(records),
         })
     return records
+
+
+def extract_chunks(source_spec, input_path, output_dir, min_chars=4, max_chars=240, limit=None,
+                   chunk_bytes=DEFAULT_CHUNK_BYTES, manifest_path=None):
+    """Write human-readable, uncompressed staging JSONL chunks without loading all rows."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    seen = set()
+    files = []
+    handle = None
+    current_size = 0
+    records = 0
+
+    def open_chunk(number):
+        path = output_dir / f"part-{number:05d}.jsonl"
+        files.append(path)
+        return path.open("w", encoding="utf-8")
+
+    try:
+        for location, row in iter_input(input_path, source_spec.get("format", "text")):
+            for text, context, source_record_id in turn_candidates(row, source_spec, location):
+                if not min_chars <= len(text) <= max_chars or not CJK.search(text):
+                    continue
+                key = normalize(text)
+                if key in seen:
+                    continue
+                seen.add(key)
+                record = make_record(source_spec, source_record_id, text, context)
+                line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+                encoded_size = len(line.encode("utf-8"))
+                if handle is None or (current_size and current_size + encoded_size > chunk_bytes):
+                    if handle is not None:
+                        handle.close()
+                    handle = open_chunk(len(files))
+                    current_size = 0
+                handle.write(line)
+                current_size += encoded_size
+                records += 1
+                if limit and records >= limit:
+                    break
+            if limit and records >= limit:
+                break
+    finally:
+        if handle is not None:
+            handle.close()
+    result = {"schema_version": STAGING_SCHEMA, "source_id": source_spec["id"],
+              "input": str(input_path), "output_dir": str(output_dir), "files": [str(path) for path in files],
+              "records": records, "chunk_bytes": chunk_bytes, "extractor_version": EXTRACTOR_VERSION}
+    if manifest_path:
+        write_json(manifest_path, result)
+    return result
 
 
 def read_jsonl(path):
@@ -277,14 +347,24 @@ def run_pipeline(config_path):
     root = config_path.parent
     index_path = root / config.get("sources_file", "data/sources.json")
     index = load_index(index_path)
+    generated_chunks = []
     for job in config.get("extract", []):
         spec = source(index, job["source"])
-        extract(spec, root / job["input"], root / job["output"], job.get("min_chars", 4),
-                job.get("max_chars", 240), job.get("limit"),
-                root / job["manifest"] if job.get("manifest") else None)
+        input_path = root / job["input"]
+        if job.get("staging_dir"):
+            result = extract_chunks(spec, input_path, root / job["staging_dir"], job.get("min_chars", 4),
+                                    job.get("max_chars", 240), job.get("limit"), job.get("chunk_bytes", DEFAULT_CHUNK_BYTES),
+                                    root / job["manifest"] if job.get("manifest") else None)
+            generated_chunks.extend(result["files"])
+        else:
+            extract(spec, input_path, root / job["output"], job.get("min_chars", 4),
+                    job.get("max_chars", 240), job.get("limit"),
+                    root / job["manifest"] if job.get("manifest") else None)
     sample_config = config.get("sample")
     if sample_config:
-        sample([root / path for path in sample_config["inputs"]], root / sample_config["output"],
+        configured_inputs = [root / path for path in sample_config.get("inputs", [])]
+        sample_inputs = [Path(path) for path in generated_chunks] or configured_inputs
+        sample(sample_inputs, root / sample_config["output"],
                sample_config["count"], sample_config.get("seed", 52), sample_config.get("split", ""),
                root / sample_config["manifest"] if sample_config.get("manifest") else None)
 
