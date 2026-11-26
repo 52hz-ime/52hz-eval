@@ -1,0 +1,11 @@
+{
+  "sources_file": "sources.json",
+  "extract": [
+    {"source": "lccc_base", "input": "../raw/lccc_base", "staging_dir": "../build/staging/lccc_base", "chunk_bytes": 67108864},
+    {"source": "lccc_large", "input": "../raw/lccc_large", "staging_dir": "../build/staging/lccc_large", "deduplicate": false, "chunk_bytes": 67108864},
+    {"source": "clue_corpus_small", "input": "../raw/clue_corpus_small", "staging_dir": "../build/staging/clue_corpus_small", "deduplicate": false, "max_chars": 1000000, "chunk_bytes": 67108864},
+    {"source": "thucnews", "input": "../raw/thucnews", "staging_dir": "../build/staging/thucnews", "deduplicate": false, "max_chars": 1000000, "chunk_bytes": 67108864},
+    {"source": "kdconv", "input": "../raw/kdconv", "staging_dir": "../build/staging/kdconv", "chunk_bytes": 67108864},
+    {"source": "wikipedia_zh_control", "input": "../raw/wikipedia_zh_control", "staging_dir": "../build/staging/wikipedia_zh_control", "optional": true, "deduplicate": false, "max_chars": 1000000, "chunk_bytes": 67108864}
+  ]
+}

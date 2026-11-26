@@ -45,14 +45,26 @@ def canonical_digest(payload):
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def load_config(config_path):
+def data_path(root, configured, data_root=None):
+    path = Path(configured)
+    if path.is_absolute() or data_root is None:
+        return (root / path).resolve() if not path.is_absolute() else path
+    parts = path.parts
+    if len(parts) >= 2 and parts[0] == ".." and parts[1] in ("raw", "build"):
+        return (Path(data_root) / parts[1] / Path(*parts[2:])).resolve()
+    return (root / path).resolve()
+
+
+def load_config(config_path, data_root=None):
     config_path = Path(config_path).resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
     root = config_path.parent
     sources_file = (root / config.get("sources_file", "data/sources.json")).resolve()
     inputs = []
     for job in config.get("extract", []):
-        inputs.append(input_signature((root / job["input"]).resolve()))
+        inputs.append(input_signature(data_path(root, job["input"], data_root)))
+    for path in config.get("staging_inputs", []):
+        inputs.append(input_signature(data_path(root, path, data_root)))
     tracked = {"config": config, "sources": sources_file.read_text(encoding="utf-8"),
                "inputs": inputs, "extractor_version": EXTRACTOR_VERSION,
                "generator_version": GENERATOR_VERSION, "pipeline_version": PIPELINE_VERSION}
@@ -67,20 +79,21 @@ def load_config(config_path):
     return config, root, sources_file, tracked
 
 
-def resolved_config(config, root, sources_file, partial, include_sample=True):
+def resolved_config(config, root, sources_file, partial, include_sample=True, data_root=None):
     jobs = []
     outputs = []
     for index, job in enumerate(config.get("extract", [])):
         output = partial / "extract" / f"{index:02d}-{job['source']}.jsonl"
         manifest = partial / "extract" / f"{index:02d}-{job['source']}.manifest.json"
-        jobs.append({**job, "input": str((root / job["input"]).resolve()), "output": str(output),
+        jobs.append({**job, "input": str(data_path(root, job["input"], data_root)), "output": str(output),
                      "staging_dir": str(partial / "staging" / job["source"]),
                      "manifest": str(partial / "staging" / f"{job['source']}.manifest.json")})
         outputs.append(str(output))
     sample = config.get("sample")
     resolved = {"sources_file": str(sources_file), "extract": jobs}
     if sample and include_sample:
-        resolved["sample"] = {**sample, "inputs": outputs, "output": str(partial / "clean.jsonl"),
+        staging_inputs = [str(data_path(root, path, data_root)) for path in config.get("staging_inputs", [])]
+        resolved["sample"] = {**sample, "inputs": staging_inputs or outputs, "output": str(partial / "clean.jsonl"),
                                "manifest": str(partial / "clean.manifest.json")}
     return resolved
 
@@ -94,7 +107,7 @@ def complete(final_dir, stage_only=False):
     except (OSError, ValueError):
         return False
     if stage_only:
-        return payload.get("status") == "staging_complete" and (final_dir / "staging").is_dir()
+        return payload.get("status") == "staging_complete" and any((final_dir / "staging").rglob("part-*.jsonl"))
     return payload.get("status") == "complete" and (final_dir / "staging").is_dir() and all(
         (final_dir / name).is_file() for name in ("clean.jsonl", "pinyin.jsonl", "cases.jsonl"))
 
@@ -115,10 +128,14 @@ def rewrite_run_paths(run_dir, old_dir):
         write_json(path, replace_paths(payload, old_dir, run_dir))
 
 
-def run(config_path, stage_only=False):
-    config, root, sources_file, tracked = load_config(config_path)
+def run(config_path, stage_only=False, data_root=None):
+    config, root, sources_file, tracked = load_config(config_path, data_root)
+    missing_staging = [str(data_path(root, path, data_root)) for path in config.get("staging_inputs", [])
+                       if not data_path(root, path, data_root).exists()]
+    if missing_staging:
+        raise ValueError("缺少 staging，请先运行 make staging：" + ", ".join(missing_staging))
     run_id = f"v{PIPELINE_VERSION}-{canonical_digest(tracked)[:12]}"
-    build_dir = (root.parent / "build") if root.name == "data" else (root / "build")
+    build_dir = (Path(data_root) / "build") if data_root else ((root.parent / "build") if root.name == "data" else (root / "build"))
     runs_dir = build_dir / "runs"
     final_dir = (build_dir / "staging-runs" if stage_only else runs_dir) / run_id
     if complete(final_dir, stage_only):
@@ -136,7 +153,7 @@ def run(config_path, stage_only=False):
                 "generator_version": GENERATOR_VERSION}
     write_json(partial / "manifest.json", manifest)
     try:
-        resolved = resolved_config(config, root, sources_file, partial, include_sample=not stage_only)
+        resolved = resolved_config(config, root, sources_file, partial, include_sample=not stage_only, data_root=data_root)
         write_json(partial / "pipeline.resolved.json", resolved)
         resolved_path = partial / "pipeline.resolved.json"
         run_pipeline(resolved_path)
@@ -168,13 +185,41 @@ def run(config_path, stage_only=False):
         raise
 
 
+def stage_flat(config_path, output_dir, data_root=None):
+    """Build the current readable staging tree without a run-id directory."""
+    config, root, sources_file, _ = load_config(config_path, data_root)
+    output_dir = Path(output_dir).resolve()
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    jobs = []
+    for job in config.get("extract", []):
+        jobs.append({**job, "input": str(data_path(root, job["input"], data_root)),
+                     "staging_dir": str(output_dir / job["source"]),
+                     "manifest": str(output_dir / f"{job['source']}.manifest.json")})
+    resolved_path = output_dir / "pipeline.resolved.json"
+    write_json(resolved_path, {"sources_file": str(sources_file), "extract": jobs})
+    run_pipeline(resolved_path)
+    write_json(output_dir / "manifest.json", {"operation": "staging", "status": "complete",
+                                               "config": str(Path(config_path).resolve()),
+                                               "output_dir": str(output_dir),
+                                               "sources": [job["source"] for job in jobs]})
+    print(f"staging 完成：{output_dir}")
+    return {"status": "complete", "output_dir": str(output_dir)}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="data/benchmark.pipeline.json", type=Path)
     parser.add_argument("--staging-only", action="store_true")
+    parser.add_argument("--output-dir", type=Path, help="写入当前 staging 树，不使用 run-id")
+    parser.add_argument("--data-root", type=Path, help="raw/build 所在的数据根目录")
     args = parser.parse_args(argv)
     try:
-        run(args.config, args.staging_only)
+        if args.output_dir:
+            stage_flat(args.config, args.output_dir, args.data_root)
+        else:
+            run(args.config, args.staging_only, args.data_root)
     except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
         parser.exit(2, f"{error}\n")
     return 0

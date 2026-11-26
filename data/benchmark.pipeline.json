@@ -1,23 +1,14 @@
 {
   "sources_file": "sources.json",
-  "extract": [
-    {
-      "source": "thucnews",
-      "input": "../raw/thucnews",
-      "staging_dir": "../build/staging/thucnews",
-      "manifest": "../build/staging/thucnews.manifest.json",
-      "min_chars": 4,
-      "max_chars": 160,
-      "limit": 5000,
-      "chunk_bytes": 67108864
-    }
-  ],
+  "staging_inputs": ["../build/staging/thucnews"],
+  "extract": [],
   "sample": {
     "inputs": [],
     "output": "../build/clean.jsonl",
     "count": 5000,
     "seed": 52,
     "split": "dev",
+    "deduplicate": false,
     "manifest": "../build/clean.manifest.json"
   }
 }

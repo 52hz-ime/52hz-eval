@@ -19,9 +19,13 @@
 - 优先使用简体中文的日常对话、帖子、评论和新闻。
 - Wikipedia 只作为少量风格对照，不作为主数据来源。
 - 每个来源都登记在 `data/sources.json`，记录稳定 ID、来源页面、数据 artifact、格式、字段、推荐占比、使用优先级和质量策略。
-- 原始下载文件放在本地 `raw/`，清洗结果放在 `build/`；这两个目录不进入 Git。
+- 原始下载文件和生成结果默认放在 `/data/52hz-eval/raw/`、`/data/52hz-eval/build/`；仓库只保存配置、代码和测试。
 - 所有抽取、清洗、去重和采样都由标准库脚本完成，并保存随机种子、抽取器版本和 manifest。
 - 原始对话语料不是自动 gold：`manual_review` 和 `mixed_review` 来源先进入待审核池；只有审核通过的记录才能进入正式 benchmark。
+
+## OSS 配置
+
+公开的 OSS 路由配置位于 `data/oss.public.env`；AccessKey 只从本机 `~/.config/52hz/oss.env` 读取，不进入仓库。当前 staging 上传目标是上海地域的 `52hz-ime` Bucket 和 `52hz/staging/` prefix。
 
 ## 可复用 workflow
 
@@ -38,7 +42,7 @@ make download SOURCES=lccc_base,kdconv
 make download SOURCES=all
 ```
 
-每个文件都会先检查 `raw/<source-id>/` 下是否已有完整文件；完整文件打印“已有，跳过”，中断文件保留为 `.part` 并在下次继续。输出包含来源序号、文件序号、当前文件名、下载完成状态和最终汇总。CLUECorpusSmall、THUCNews 等文件较大，下载前应确认磁盘空间；没有自动入口的来源会明确打印 `manual`，不会伪装成已下载。
+每个文件都会先检查 `/data/52hz-eval/raw/<source-id>/` 下是否已有完整文件；完整文件打印“已有，跳过”，中断文件保留为 `.part` 并在下次继续。输出包含来源序号、文件序号、当前文件名、下载完成状态和最终汇总。CLUECorpusSmall、THUCNews 等文件较大，下载前应确认磁盘空间；没有自动入口的来源会明确打印 `manual`，不会伪装成已下载。
 
 先查看来源索引：
 
@@ -57,10 +61,10 @@ make setup
 ```sh
 python3 -m tools.corpus_workflow extract \
   --source lccc_base \
-  --input raw/lccc_base \
-  --output build/lccc-base.jsonl \
+  --input /data/52hz-eval/raw/lccc_base \
+  --output /data/52hz-eval/build/lccc-base.jsonl \
   --min-chars 4 --max-chars 160 \
-  --manifest build/lccc-base.manifest.json
+  --manifest /data/52hz-eval/build/lccc-base.manifest.json
 ```
 
 抽取阶段会做 Unicode NFC、控制字符清理、空白归一化、中文存在性过滤、长度过滤和同来源精确去重；不会把中文全角标点转换成半角，并写出统一记录：
@@ -82,16 +86,16 @@ python3 -m tools.corpus_workflow extract \
 
 ```sh
 python3 -m tools.corpus_workflow sample \
-  --input build/lccc-base.jsonl build/comments2019zh.jsonl \
-  --output build/benchmark-clean.jsonl \
+  --input /data/52hz-eval/build/lccc-base.jsonl /data/52hz-eval/build/comments2019zh.jsonl \
+  --output /data/52hz-eval/build/benchmark-clean.jsonl \
   --count 5000 --seed 52 --split dev \
-  --manifest build/benchmark-clean.manifest.json
+  --manifest /data/52hz-eval/build/benchmark-clean.manifest.json
 ```
 
 查看来源和长度分布：
 
 ```sh
-python3 -m tools.corpus_workflow stats --input build/benchmark-clean.jsonl
+python3 -m tools.corpus_workflow stats --input /data/52hz-eval/build/benchmark-clean.jsonl
 ```
 
 完整流程可以写入 `data/pipeline.example.json`，然后运行：
@@ -116,7 +120,7 @@ make extract
 make staging
 ```
 
-结果位于 `build/staging-runs/<run-id>/staging/`，当前指针是 `build/current-staging.json`；重复执行相同条件会跳过。
+默认配置 `data/staging.pipeline.json` 会遍历全部已登记来源；缺失的可选来源（例如尚未准备的 Wikipedia）会明确跳过。结果直接位于 `/data/52hz-eval/build/staging/<source-id>/`，不再带 run ID；重复执行会重建当前 staging 树。之前已经生成的 `/data/52hz-eval/build/staging-runs/` 历史结果仍保留，直到执行 `make clean`。
 
 清理所有生成的 clean、pinyin、cases、manifest 和历史 run：
 
@@ -124,27 +128,29 @@ make staging
 make clean
 ```
 
-该命令只删除 `build/`，不会删除 `raw/` 中已下载的原始语料。
+该命令只删除 `/data/52hz-eval/build/`，不会删除 `/data/52hz-eval/raw/` 中已下载的原始语料。
 
-它使用 `data/benchmark.pipeline.json`，默认从 THUCNews 抽取 5,000 条句子，依次生成：
+它使用 `data/benchmark.pipeline.json`，从已经完成的 THUCNews staging 中采样 5,000 条句子，依次生成：
 
 ```text
-raw/ 语料
-  -> build/runs/<run-id>/staging/  不压缩的统一 JSONL 分片，方便检查
-  -> build/runs/<run-id>/clean.jsonl   抽取、清洗、切句、去重、采样
-  -> build/runs/<run-id>/pinyin.jsonl  中文转拼音，literal 原样保留
-  -> build/runs/<run-id>/cases.jsonl   漏键、重复、邻键、交换、截断等噪声样本
+/data/52hz-eval/raw/ 语料
+  -> make staging
+  -> /data/52hz-eval/build/staging/  不压缩的统一 JSONL 分片，方便检查
+  -> make extract
+  -> /data/52hz-eval/build/runs/<run-id>/clean.jsonl   抽取、清洗、切句、去重、采样
+  -> /data/52hz-eval/build/runs/<run-id>/pinyin.jsonl  中文转拼音，literal 原样保留
+  -> /data/52hz-eval/build/runs/<run-id>/cases.jsonl   漏键、重复、邻键、交换、截断等噪声样本
 ```
 
-结果按输入、配置、来源文件指纹、处理器源码、`pyproject.toml`/`uv.lock` 和生成器版本计算 run ID，实际保存到 `build/runs/<run-id>/`。同一条件再次运行会输出“已有完整 run，跳过”；条件变化会生成新的 run，不覆盖旧结果。`build/current.json` 只保存当前完整 run 的指针。
+结果按 staging 输入、配置、来源文件指纹、处理器源码、`pyproject.toml`/`uv.lock` 和生成器版本计算 run ID，实际保存到 `/data/52hz-eval/build/runs/<run-id>/`。同一条件再次运行会输出“已有完整 run，跳过”；条件变化会生成新的 run，不覆盖旧结果。`/data/52hz-eval/build/current.json` 只保存当前完整 run 的指针。
 
 staging 默认每个分片约 64 MiB，文件名为 `part-00000.jsonl`，保持普通文本格式，便于 `head`、`jq` 和编辑器检查。LCCC 和 CLUE 不在默认正式流程里：前者需要人工审核，后者文件过大。需要调整来源、数量或分片大小时，编辑 `data/benchmark.pipeline.json`，不需要把一串参数写在命令行里。
 
 抽取出的统一 JSONL 先转成带有 literal 片段和音节映射的拼音记录，再生成输入法 cases：
 
 ```sh
-make pinyin CLEAN_INPUT=build/clean.jsonl
-make noise PINYIN_INPUT=build/pinyin.jsonl
+make pinyin CLEAN_INPUT=/data/52hz-eval/build/clean.jsonl
+make noise PINYIN_INPUT=/data/52hz-eval/build/pinyin.jsonl
 ```
 
 等价的 CLI 是：

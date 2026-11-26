@@ -12,7 +12,7 @@ help:
 	  'make setup     用 uv 同步 pyproject.toml 依赖' \
 	  'make extract   默认完成抽取、转拼音和噪声生成' \
 	  'make staging   只做 raw 到可读 staging 分片' \
-	  'make clean     删除 build/ 生成物，不删除 raw/ 语料' \
+	  'make clean     删除 DATA_ROOT/build 生成物，不删除 raw 语料' \
 	  'make pinyin    clean JSONL 转拼音（CLEAN_INPUT=...）' \
 	  'make noise     从拼音记录生成噪声 cases（PINYIN_INPUT=...）' \
 	  'make test      运行 workflow 离线测试' \
@@ -22,7 +22,10 @@ sources:
 	$(PYTHON) -m tools.corpus_workflow list --sources data/sources.json
 
 SOURCES ?= all
-RAW_DIR ?= raw
+DATA_ROOT ?= /data/52hz-eval
+RAW_DIR ?= $(DATA_ROOT)/raw
+BUILD_DIR ?= $(DATA_ROOT)/build
+STAGING_CONFIG ?= data/staging.pipeline.json
 
 download:
 	$(PYTHON) -m tools.download_sources --sources data/sources.json --raw-dir "$(RAW_DIR)" --select "$(SOURCES)"
@@ -31,20 +34,20 @@ setup:
 	uv sync
 
 extract:
-	uv run python -m tools.benchmark_pipeline --config data/benchmark.pipeline.json
+	uv run python -m tools.benchmark_pipeline --config data/benchmark.pipeline.json --data-root "$(DATA_ROOT)"
 
 staging:
-	uv run python -m tools.benchmark_pipeline --config data/benchmark.pipeline.json --staging-only
+	uv run python -m tools.benchmark_pipeline --config "$(STAGING_CONFIG)" --staging-only --output-dir "$(BUILD_DIR)/staging" --data-root "$(DATA_ROOT)"
 
 clean:
 	@test "$(CURDIR)" != "/" || { echo '拒绝在根目录执行清理。' >&2; exit 2; }
-	rm -rf -- build
-	@printf '%s\n' '已清理 build/；raw/ 原始语料保持不变。'
+	rm -rf -- "$(BUILD_DIR)"
+	@printf '%s\n' '已清理 $(BUILD_DIR)；$(RAW_DIR) 原始语料保持不变。'
 
-CLEAN_INPUT ?= build/clean.jsonl
-PINYIN_INPUT ?= build/pinyin.jsonl
-PINYIN_OUTPUT ?= build/pinyin.jsonl
-CASES_OUTPUT ?= build/cases.jsonl
+CLEAN_INPUT ?= $(BUILD_DIR)/clean.jsonl
+PINYIN_INPUT ?= $(BUILD_DIR)/pinyin.jsonl
+PINYIN_OUTPUT ?= $(BUILD_DIR)/pinyin.jsonl
+CASES_OUTPUT ?= $(BUILD_DIR)/cases.jsonl
 
 pinyin:
 	uv run python -m tools.pinyin_cases pinyin --input "$(CLEAN_INPUT)" --output "$(PINYIN_OUTPUT)" --manifest "$(PINYIN_OUTPUT:.jsonl=.manifest.json)"

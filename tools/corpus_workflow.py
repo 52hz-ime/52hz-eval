@@ -227,11 +227,11 @@ def extract(source_spec, input_path, output_path, min_chars=4, max_chars=240, li
 
 
 def extract_chunks(source_spec, input_path, output_dir, min_chars=4, max_chars=240, limit=None,
-                   chunk_bytes=DEFAULT_CHUNK_BYTES, manifest_path=None):
+                   chunk_bytes=DEFAULT_CHUNK_BYTES, manifest_path=None, deduplicate=True):
     """Write human-readable, uncompressed staging JSONL chunks without loading all rows."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    seen = set()
+    seen = set() if deduplicate else None
     files = []
     handle = None
     current_size = 0
@@ -247,10 +247,11 @@ def extract_chunks(source_spec, input_path, output_dir, min_chars=4, max_chars=2
             for text, context, source_record_id in turn_candidates(row, source_spec, location):
                 if not min_chars <= len(text) <= max_chars or not CJK.search(text):
                     continue
-                key = normalize(text)
-                if key in seen:
-                    continue
-                seen.add(key)
+                if seen is not None:
+                    key = normalize(text)
+                    if key in seen:
+                        continue
+                    seen.add(key)
                 record = make_record(source_spec, source_record_id, text, context)
                 line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
                 encoded_size = len(line.encode("utf-8"))
@@ -271,7 +272,8 @@ def extract_chunks(source_spec, input_path, output_dir, min_chars=4, max_chars=2
             handle.close()
     result = {"schema_version": STAGING_SCHEMA, "source_id": source_spec["id"],
               "input": str(input_path), "output_dir": str(output_dir), "files": [str(path) for path in files],
-              "records": records, "chunk_bytes": chunk_bytes, "extractor_version": EXTRACTOR_VERSION}
+              "records": records, "chunk_bytes": chunk_bytes, "deduplicate": deduplicate,
+              "extractor_version": EXTRACTOR_VERSION}
     if manifest_path:
         write_json(manifest_path, result)
     return result
@@ -289,6 +291,17 @@ def read_jsonl(path):
             yield row
 
 
+def expand_jsonl_inputs(paths):
+    expanded = []
+    for path in paths:
+        path = Path(path)
+        if path.is_dir():
+            expanded.extend(sorted(item for item in path.rglob("part-*.jsonl") if item.is_file()))
+        else:
+            expanded.append(path)
+    return expanded
+
+
 def write_jsonl(path, rows):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,17 +316,26 @@ def write_json(path, payload):
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def sample(inputs, output_path, count, seed, split="", manifest_path=None):
+def sample(inputs, output_path, count, seed, split="", manifest_path=None, deduplicate=True):
     records = []
-    seen = set()
+    seen = set() if deduplicate else None
+    candidates = 0
+    rng = random.Random(seed)
     for path in inputs:
         for row in read_jsonl(path):
-            key = normalize(row["text"])
-            if key in seen:
-                continue
-            seen.add(key)
-            records.append(row)
-    random.Random(seed).shuffle(records)
+            if seen is not None:
+                key = normalize(row["text"])
+                if key in seen:
+                    continue
+                seen.add(key)
+            candidates += 1
+            if len(records) < count:
+                records.append(row)
+            else:
+                position = rng.randrange(candidates)
+                if position < count:
+                    records[position] = row
+    rng.shuffle(records)
     selected = records[:count]
     if split:
         selected = [{**row, "split": split} for row in selected]
@@ -325,9 +347,11 @@ def sample(inputs, output_path, count, seed, split="", manifest_path=None):
             "inputs": [str(path) for path in inputs],
             "output": str(output_path),
             "requested": count,
+            "candidates": candidates,
             "selected": len(selected),
             "seed": seed,
             "split": split,
+            "deduplicate": deduplicate,
             "sources": dict(sorted(Counter(row.get("source_id", "unknown") for row in selected).items())),
         })
     return selected
@@ -348,14 +372,21 @@ def run_pipeline(config_path):
     index_path = root / config.get("sources_file", "data/sources.json")
     index = load_index(index_path)
     generated_chunks = []
-    for job in config.get("extract", []):
+    jobs = config.get("extract", [])
+    for number, job in enumerate(jobs, 1):
         spec = source(index, job["source"])
         input_path = root / job["input"]
+        if not input_path.exists() and job.get("optional"):
+            print(f"[{number}/{len(jobs)}] 跳过缺失可选来源：{job['source']} ({input_path})", flush=True)
+            continue
+        print(f"[{number}/{len(jobs)}] staging：{job['source']} -> {input_path}", flush=True)
         if job.get("staging_dir"):
             result = extract_chunks(spec, input_path, root / job["staging_dir"], job.get("min_chars", 4),
                                     job.get("max_chars", 240), job.get("limit"), job.get("chunk_bytes", DEFAULT_CHUNK_BYTES),
-                                    root / job["manifest"] if job.get("manifest") else None)
+                                    root / job["manifest"] if job.get("manifest") else None,
+                                    job.get("deduplicate", True))
             generated_chunks.extend(result["files"])
+            print(f"    完成：{result['records']} 条，{len(result['files'])} 个分片", flush=True)
         else:
             extract(spec, input_path, root / job["output"], job.get("min_chars", 4),
                     job.get("max_chars", 240), job.get("limit"),
@@ -363,10 +394,11 @@ def run_pipeline(config_path):
     sample_config = config.get("sample")
     if sample_config:
         configured_inputs = [root / path for path in sample_config.get("inputs", [])]
-        sample_inputs = [Path(path) for path in generated_chunks] or configured_inputs
+        sample_inputs = expand_jsonl_inputs([Path(path) for path in generated_chunks] or configured_inputs)
         sample(sample_inputs, root / sample_config["output"],
                sample_config["count"], sample_config.get("seed", 52), sample_config.get("split", ""),
-               root / sample_config["manifest"] if sample_config.get("manifest") else None)
+               root / sample_config["manifest"] if sample_config.get("manifest") else None,
+               sample_config.get("deduplicate", True))
 
 
 def main(argv=None):

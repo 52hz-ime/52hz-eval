@@ -128,7 +128,7 @@
       "format": "text",
       "download": {
         "kind": "manual",
-        "instructions": "从 Wikimedia dump 下载 zhwiki，再解压到 raw/wikipedia_zh_control/。"
+        "instructions": "从 Wikimedia dump 下载 zhwiki，再解压到 /data/52hz-eval/raw/wikipedia_zh_control/。"
       },
       "text_fields": [],
       "context_fields": [],
