@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 PYTHON ?= python3
 
-.PHONY: help setup test sources download extract pinyin noise clean
+.PHONY: help setup test sources download extract staging quality pinyin noise clean
 
 help:
 	@printf '%s\n' \
@@ -12,6 +12,7 @@ help:
 	  'make setup     用 uv 同步 pyproject.toml 依赖' \
 	  'make extract   默认完成抽取、转拼音和噪声生成' \
 	  'make staging   只做 raw 到可读 staging 分片' \
+	  'make quality    采样 10k/100k/1m 并生成 filter 结果' \
 	  'make clean     删除 DATA_ROOT/build 生成物，不删除 raw 语料' \
 	  'make pinyin    clean JSONL 转拼音（CLEAN_INPUT=...）' \
 	  'make noise     从拼音记录生成噪声 cases（PINYIN_INPUT=...）' \
@@ -38,6 +39,12 @@ extract:
 
 staging:
 	uv run python -m tools.benchmark_pipeline --config "$(STAGING_CONFIG)" --staging-only --output-dir "$(BUILD_DIR)/staging" --data-root "$(DATA_ROOT)"
+
+QUALITY_DIR ?= $(BUILD_DIR)/quality/iteration-001
+QUALITY_INPUTS ?= $(BUILD_DIR)/staging/lccc_base $(BUILD_DIR)/staging/lccc_large $(BUILD_DIR)/staging/clue_corpus_small $(BUILD_DIR)/staging/thucnews $(BUILD_DIR)/staging/kdconv
+
+quality:
+	uv run python -m tools.quality_pipeline --input $(QUALITY_INPUTS) --output-dir "$(QUALITY_DIR)" --sizes 10000,100000,1000000 --seed 52
 
 clean:
 	@test "$(CURDIR)" != "/" || { echo '拒绝在根目录执行清理。' >&2; exit 2; }

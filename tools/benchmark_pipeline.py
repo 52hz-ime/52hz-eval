@@ -108,7 +108,7 @@ def complete(final_dir, stage_only=False):
         return False
     if stage_only:
         return payload.get("status") == "staging_complete" and any((final_dir / "staging").rglob("part-*.jsonl"))
-    return payload.get("status") == "complete" and (final_dir / "staging").is_dir() and all(
+    return payload.get("status") == "complete" and all(
         (final_dir / name).is_file() for name in ("clean.jsonl", "pinyin.jsonl", "cases.jsonl"))
 
 

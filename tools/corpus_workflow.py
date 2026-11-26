@@ -321,7 +321,7 @@ def sample(inputs, output_path, count, seed, split="", manifest_path=None, dedup
     seen = set() if deduplicate else None
     candidates = 0
     rng = random.Random(seed)
-    for path in inputs:
+    for path in expand_jsonl_inputs(inputs):
         for row in read_jsonl(path):
             if seen is not None:
                 key = normalize(row["text"])

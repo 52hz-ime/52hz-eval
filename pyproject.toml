@@ -16,6 +16,7 @@ dependencies = [
 52hz-download = "tools.download_sources:main"
 52hz-pinyin = "tools.pinyin_cases:main"
 52hz-benchmark = "tools.benchmark_pipeline:main"
+52hz-quality = "tools.quality_pipeline:main"
 
 [tool.setuptools]
 packages = ["tools"]
