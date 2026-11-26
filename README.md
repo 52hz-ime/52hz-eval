@@ -173,6 +173,47 @@ uv run 52hz-pinyin noise \
 
 默认不会把 `manual_review` 或 `mixed_review` 来源生成正式 cases；审核前如需做探索性输出，显式加 `--include-review`。
 
+## 子句级 IME benchmark
+
+`make benchmark` 从整个 staging 树构建各来源等量的 benchmark，默认写到 `/data/52hz-eval/build/benchmark/iteration-003/`：
+
+```sh
+make benchmark                       # 每个来源 1000 条基础子句，另抽 100 条试跑小集
+make benchmark PER_SOURCE=300 TRIAL=0 BENCHMARK_DIR=/data/52hz-eval/build/benchmark/try-004
+```
+
+处理步骤：
+
+1. **按逗号和句号切成子句。** 每条 staging 记录在 `，。！？；…` 处切开，标点留在它结束的子句上；`、` 不切，数字之间的 ASCII 逗号不切（`1,000`、`3.14` 保持完整）。一个子句就是一次“连续输入后按空格”的单位，长度限定 4–30 个字符。
+2. **每个子句单独清洗。** 规则在 `quality_filter.py`（0.3.0）。除了原有规则，还拒绝：没有开头的收尾引号或括号、以收尾符或标点开头、以引号开头符结尾、汉字之间夹空格、URL / @ / # / 表情符号、繁体和日文汉字、非汉字非 ASCII 的字母、兼容区和扩展 B 的生僻字、`1、` `12:` 这样的列表编号、英文字母超过 30% 或数字超过 40%。逗号后面的收尾引号不算问题，例如 `……不成问题，”`。
+3. **各来源等量采样。** 长度按目标正态分布加权（默认均值 12、标准差 5），实际分布写在 `manifest.json` 的 `lengths` 里。
+4. **上文取两行。** 记录 `context` 的最后一行（对话的上一轮、新闻的标题），加上同一个文档里的前一个子句，各至多 60 字；不传完整对话历史。
+
+对话来源仍是 `manual_review` / `mixed_review`，所以 `make benchmark` 显式带 `--include-review`。直接运行命令而不带它时，只要选中的来源里有待审核的，就会报错退出，不会悄悄只剩一个来源。
+
+产物：
+
+```text
+base.jsonl        抽中的基础子句及其拼音
+cases.jsonl       基础子句 × 噪声操作，字段和之前的 cases.jsonl 相同；默认 7 种操作：
+                  clean、drop、duplicate、insert、neighbor、swap、truncate_suffix
+trial-100.jsonl   按来源 × 操作轮流抽取的试跑小集
+manifest.json     来源、操作、长度分布、被各条规则拦截的数量
+shards/           每个来源的扫描缓存；staging、过滤规则和切分规则不变时直接复用
+```
+
+第一次运行要扫描全部 staging（约 46 GB，32 核约 2 分钟），之后改采样数量、长度目标或种子只需几秒。`shards/<来源>-<缓存键>.rejected.jsonl` 按千分之一抽样保存了被拒绝的子句和命中的规则，用来人工检查清洗是否误伤。
+
+`make lexicon` 从同一个 benchmark 的通过池统计单字频率和至少出现 20 次的二字组合，写成带拼音的词表 `/data/52hz-eval/build/benchmark/lexicon.jsonl`（约 45 万条，1 分钟）。benchmark 本身不使用它。它是为“追问”课题准备的：解码器要判断按键的另一处读法是不是一个真词，需要一份词表；让模型自己列举会编出不存在的词。
+
+改了 staging 的切分规则时可以只重建一个来源，其余目录不动：
+
+```sh
+make staging SOURCE=thucnews
+```
+
+THUCNews 的记录是按句切出来的。之前的切分把句号和它后面的收尾引号分到了两条记录，产生 `”不知比尔。` 这样的开头；现在收尾引号跟随它闭合的那一句，需要用上面的命令重建一次 thucnews。
+
 ## 后续阶段
 
 当前 workflow 只负责原始语料到干净基础句的可复现处理。拼音生成、漏键/邻键/交换/截断等噪声变体，以及 `preview`、`commit`、`ask` 交互标签，放在下一层 generator 中，输入应是这里输出的统一 JSONL，而不是重新读取各个来源的原始格式。

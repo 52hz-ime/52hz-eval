@@ -18,7 +18,7 @@ DEFAULT_CHUNK_BYTES = 64 * 1024 * 1024
 CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 CONTROL = re.compile(r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]")
 SPACE = re.compile(r"\s+")
-SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?；;…])(?=[^。！？!?；;…])|[\r\n]+")
+SENTENCE_UNIT = re.compile(r"[^。！？!?；;…\r\n]+?[。！？!?；;…]+[”’）》」』〕】〉]*")
 
 
 def load_index(path):
@@ -91,7 +91,15 @@ def join_field(row, fields, join_tokens=False):
 def split_units(value, mode=""):
     if mode != "sentences":
         return [value]
-    return [part.strip() for part in SENTENCE_SPLIT.split(value) if part.strip()]
+    # A closing quote or bracket after the end mark stays with the sentence it closes.
+    parts = []
+    last = 0
+    for match in SENTENCE_UNIT.finditer(value):
+        parts.extend(piece for piece in re.split(r"[\r\n]+", value[last:match.start()]) if piece.strip())
+        parts.append(match.group())
+        last = match.end()
+    parts.extend(piece for piece in re.split(r"[\r\n]+", value[last:]) if piece.strip())
+    return [part.strip() for part in parts]
 
 
 def iter_input(path, fmt):

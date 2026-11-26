@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.benchmark_pipeline import run
+from tools.benchmark_pipeline import run, stage_flat
 
 
 class BenchmarkPipelineTests(unittest.TestCase):
@@ -59,3 +59,30 @@ class BenchmarkPipelineTests(unittest.TestCase):
             self.assertEqual(first["status"], "staging_complete")
             self.assertTrue(second.get("skipped", False))
             self.assertTrue((root / "build" / "staging-runs" / first["run_id"] / "staging").is_dir())
+
+    def test_flat_staging_rebuilds_only_the_requested_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "data" / "sources.json").write_text(json.dumps({"sources": [
+                {"id": "news", "format": "jsonl", "split": "sentences", "text_fields": ["content"], "quality_policy": "editorial"},
+                {"id": "chat", "format": "text", "quality_policy": "editorial"}]}), encoding="utf-8")
+            (root / "raw").mkdir()
+            (root / "raw" / "news.jsonl").write_text(json.dumps({"id": "n1", "content": "他说：“好的。”明天见。"}, ensure_ascii=False) + "\n",
+                                                  encoding="utf-8")
+            (root / "raw" / "chat.txt").write_text("明天见啦。\n", encoding="utf-8")
+            config = root / "data" / "pipeline.json"
+            config.write_text(json.dumps({"sources_file": "sources.json", "extract": [
+                {"source": "news", "input": "../raw/news.jsonl", "staging_dir": "unused-news"},
+                {"source": "chat", "input": "../raw/chat.txt", "staging_dir": "unused-chat"}]}), encoding="utf-8")
+            stage = root / "staging"
+            stage_flat(config, stage)
+            chat_before = (stage / "chat" / "part-00000.jsonl").read_bytes()
+            stage_flat(config, stage, only="news")
+            texts = [json.loads(line)["text"] for line in (stage / "news" / "part-00000.jsonl").read_text().splitlines()]
+            self.assertEqual(texts, ["他说：“好的。”", "明天见。"])
+            self.assertEqual((stage / "chat" / "part-00000.jsonl").read_bytes(), chat_before)
+            self.assertFalse(list(stage.glob(".*partial*")))
+            self.assertEqual(json.loads((stage / "news.manifest.json").read_text())["output_dir"], str(stage / "news"))
+            with self.assertRaises(ValueError):
+                stage_flat(config, stage, only="missing")

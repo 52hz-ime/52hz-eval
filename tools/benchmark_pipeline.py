@@ -185,21 +185,37 @@ def run(config_path, stage_only=False, data_root=None):
         raise
 
 
-def stage_flat(config_path, output_dir, data_root=None):
-    """Build the current readable staging tree without a run-id directory."""
+def stage_flat(config_path, output_dir, data_root=None, only=None):
+    """Build the current readable staging tree without a run-id directory, optionally for one source."""
     config, root, sources_file, _ = load_config(config_path, data_root)
     output_dir = Path(output_dir).resolve()
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    jobs = []
-    for job in config.get("extract", []):
-        jobs.append({**job, "input": str(data_path(root, job["input"], data_root)),
-                     "staging_dir": str(output_dir / job["source"]),
-                     "manifest": str(output_dir / f"{job['source']}.manifest.json")})
-    resolved_path = output_dir / "pipeline.resolved.json"
-    write_json(resolved_path, {"sources_file": str(sources_file), "extract": jobs})
-    run_pipeline(resolved_path)
+    jobs = [{**job, "input": str(data_path(root, job["input"], data_root)),
+             "staging_dir": str(output_dir / job["source"]),
+             "manifest": str(output_dir / f"{job['source']}.manifest.json")}
+            for job in config.get("extract", []) if not only or job["source"] == only]
+    if not jobs:
+        raise ValueError(f"配置里没有这个来源：{only}")
+    if not only:
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_json(output_dir / "pipeline.resolved.json", {"sources_file": str(sources_file), "extract": jobs})
+        run_pipeline(output_dir / "pipeline.resolved.json")
+    else:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # Build beside the current directory and swap it in, so a failed rebuild leaves the old files alone.
+        partial = Path(tempfile.mkdtemp(prefix=f".{only}.partial-", dir=output_dir))
+        try:
+            staged = [{**job, "staging_dir": str(partial / only), "manifest": str(partial / Path(job["manifest"]).name)}
+                      for job in jobs]
+            write_json(partial / "pipeline.resolved.json", {"sources_file": str(sources_file), "extract": staged})
+            run_pipeline(partial / "pipeline.resolved.json")
+            shutil.rmtree(jobs[0]["staging_dir"], ignore_errors=True)
+            (partial / only).rename(jobs[0]["staging_dir"])
+            write_json(jobs[0]["manifest"], replace_paths(
+                json.loads(Path(staged[0]["manifest"]).read_text(encoding="utf-8")), partial, output_dir))
+        finally:
+            shutil.rmtree(partial, ignore_errors=True)
     write_json(output_dir / "manifest.json", {"operation": "staging", "status": "complete",
                                                "config": str(Path(config_path).resolve()),
                                                "output_dir": str(output_dir),
@@ -213,11 +229,12 @@ def main(argv=None):
     parser.add_argument("--config", default="data/benchmark.pipeline.json", type=Path)
     parser.add_argument("--staging-only", action="store_true")
     parser.add_argument("--output-dir", type=Path, help="写入当前 staging 树，不使用 run-id")
+    parser.add_argument("--source", help="只重建这一个来源的 staging 目录，其余来源保持不变")
     parser.add_argument("--data-root", type=Path, help="raw/build 所在的数据根目录")
     args = parser.parse_args(argv)
     try:
         if args.output_dir:
-            stage_flat(args.config, args.output_dir, args.data_root)
+            stage_flat(args.config, args.output_dir, args.data_root, args.source)
         else:
             run(args.config, args.staging_only, args.data_root)
     except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
