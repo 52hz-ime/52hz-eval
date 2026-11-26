@@ -38,6 +38,8 @@ class PinyinCaseTests(unittest.TestCase):
         second = list(noise_cases([record], operations, 52))
         self.assertEqual(first, second)
         self.assertEqual(first[0]["keys"], record["keys"])
+        self.assertEqual(first[0]["base_id"], record["id"])
+        self.assertEqual(first[0]["clean_keys"], record["keys"])
         self.assertTrue(all(row["expected"] == {"action": "commit", "text": "明天开会"} for row in first))
 
     def test_unreviewed_source_records_are_not_gold_by_default(self):

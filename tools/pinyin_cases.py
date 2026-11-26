@@ -226,8 +226,8 @@ def noise_cases(rows, operations, seed=52, limit=None, include_review=False):
     for row in rows:
         if row.get("quality_policy") in REVIEW_POLICIES and not include_review:
             continue
-        base = {**row, "event": "space", "expected": {"action": "commit", "text": row["text"]},
-                "noise_ops": []}
+        base = {**row, "base_id": row["id"], "clean_keys": row["keys"], "event": "space",
+                "expected": {"action": "commit", "text": row["text"]}, "noise_ops": []}
         for operation in operations:
             if operation == "clean":
                 case = {**base, "id": f"{row['id']}~clean"}
