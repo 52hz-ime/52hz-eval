@@ -1,7 +1,7 @@
 import importlib.util
 import unittest
 
-from tools.pinyin_cases import convert, mutate, noise_cases, split_sentences
+from tools.pinyin_cases import convert, mutate, neighbor, noise_cases, split_sentences
 
 
 HAS_PINYIN = importlib.util.find_spec("pypinyin") is not None
@@ -27,6 +27,11 @@ class PinyinCaseTests(unittest.TestCase):
         self.assertNotEqual(changed, record["keys"])
         self.assertEqual(changed[-3:], "ABC")
         self.assertEqual(operation["type"], "neighbor")
+
+    def test_qwerty_neighbors_include_adjacent_rows(self):
+        self.assertIn("r", neighbor("f"))
+        self.assertIn("r", neighbor("t"))
+        self.assertIn("v", neighbor("f"))
 
     def test_noise_cases_are_deterministic_and_keep_expected_text(self):
         record = {"id": "case", "text": "明天开会", "keys": "mingtiankaihui", "pinyin_segments": [

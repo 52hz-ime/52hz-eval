@@ -148,16 +148,23 @@ def editable_layout(record):
     return keys, positions, syllables
 
 
-QWERTY = ("qwertyuiop", "asdfghjkl", "zxcvbnm")
+QWERTY_ROWS = (("qwertyuiop", 0.0), ("asdfghjkl", 0.25), ("zxcvbnm", 0.75))
+QWERTY_COORDS = {char: (index + offset, row) for row, (keys, offset) in enumerate(QWERTY_ROWS)
+                 for index, char in enumerate(keys)}
 
 
 def neighbor(char):
-    for row in QWERTY:
-        if char in row:
-            index = row.index(char)
-            choices = [row[pos] for pos in (index - 1, index + 1) if 0 <= pos < len(row)]
-            return choices
-    return []
+    origin = QWERTY_COORDS.get(char)
+    if origin is None:
+        return []
+    choices = []
+    for other, point in QWERTY_COORDS.items():
+        if other == char:
+            continue
+        distance = ((origin[0] - point[0]) ** 2 + (origin[1] - point[1]) ** 2) ** 0.5
+        if distance <= 1.2:
+            choices.append(other)
+    return sorted(choices)
 
 
 def remove_positions(value, positions):
@@ -186,7 +193,7 @@ def mutate(record, operation, rng):
         position, values = rng.choice(choices)
         value = rng.choice(values)
         return keys[:position] + value + keys[position + 1:], {"type": operation, "position": position,
-                                                                 "from": keys[position], "to": value}
+                                                                 "from": keys[position], "to": value, "layout": "qwerty"}
     if operation == "swap":
         choices = [position for position in editable if position + 1 in editable]
         if not choices:
