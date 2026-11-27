@@ -4,12 +4,11 @@ import argparse
 import hashlib
 import json
 import random
-import re
 import sys
 from collections import Counter
 from pathlib import Path
 
-from tools.corpus_workflow import CJK, EXTRACTOR_VERSION, normalize, read_jsonl, write_json, write_jsonl
+from tools.corpus_workflow import CJK, EXTRACTOR_VERSION, normalize, read_jsonl, write_json
 
 
 GENERATOR_VERSION = "0.1.0"

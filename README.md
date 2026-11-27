@@ -202,15 +202,17 @@ make benchmark PER_SOURCE=300 TRIAL=100 BENCHMARK_DIR=/data/52hz-eval/build/benc
 ```text
 base.jsonl        抽中的基础子句及其拼音
 cases.jsonl       基础子句 × 噪声操作，字段和之前的 cases.jsonl 相同
-trial-300.jsonl   按来源 × 噪声类型轮流抽取的试跑小集（TRIAL=300）
-trial-100.jsonl   按来源 × 操作轮流抽取的试跑小集
+trial-300.jsonl   按来源 × 噪声类型轮流抽取的试跑小集（TRIAL=300；`make benchmark TRIAL=3000` 生成 trial-3000.jsonl，它包含 trial-300）
+holdout-3000.jsonl 验证集：和试跑集没有一条相同，抽取方式相同（`make holdout TRIAL=3000`）
 manifest.json     来源、操作、长度分布、被各条规则拦截的数量
 shards/           每个来源的扫描缓存；staging、过滤规则和切分规则不变时直接复用
 ```
 
+试跑集用来迭代，验证集只在最后量一次：在试跑集上选出来的规则，要在验证集上再测，确认不是对那一批用例的过拟合。
+
 第一次运行要扫描全部 staging（约 46 GB，32 核约 2 分钟），之后改采样数量、长度目标或种子只需几秒。`shards/<来源>-<缓存键>.rejected.jsonl` 按千分之一抽样保存了被拒绝的子句和命中的规则，用来人工检查清洗是否误伤。
 
-`make lexicon` 从同一个 benchmark 的通过池统计单字频率和至少出现 20 次的二字组合，写成带拼音的词表 `/data/52hz-eval/build/benchmark/lexicon.jsonl`（约 45 万条，1 分钟）。benchmark 本身不使用它。它是为“追问”课题准备的：解码器要判断按键的另一处读法是不是一个真词，需要一份词表；让模型自己列举会编出不存在的词。
+`make lexicon` 从同一个 benchmark 的通过池统计单字频率和至少出现 20 次的二字组合，写成带拼音的词表 `/data/52hz-eval/build/benchmark/lexicon.jsonl`（约 45 万条，1 分钟）。benchmark 本身不使用它。解码器的修复回路和评分的容忍层用它判断一段文字是不是成词；“追问”课题也用它反查真词候选，因为让模型自己列举会编出不存在的词。
 
 改了 staging 的切分规则时可以只重建一个来源，其余目录不动：
 

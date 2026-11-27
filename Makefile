@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 PYTHON ?= python3
 
-.PHONY: help setup test sources download extract staging quality pinyin noise benchmark lexicon clean
+.PHONY: help setup test sources download extract staging quality pinyin noise benchmark holdout lexicon clean
 
 help:
 	@printf '%s\n' \
@@ -17,6 +17,7 @@ help:
 	  'make pinyin    clean JSONL 转拼音（CLEAN_INPUT=...）' \
 	  'make noise     从拼音记录生成噪声 cases（PINYIN_INPUT=...）' \
 	  'make benchmark [PER_SOURCE=1000] [TRIAL=300]  各来源等量采样子句级 IME benchmark（含试跑小集）' \
+	  'make holdout [TRIAL=300] [HOLDOUT_SIZE=3000]  抽一份和试跑集没有一条相同的验证集，规则要在这里再确认一次' \
 	  'make lexicon   从 benchmark 的通过池统计二字词表，供解码器判断追问' \
 	  'make test      运行 workflow 离线测试' \
 	  'python3 -m tools.corpus_workflow run --config data/pipeline.example.json'
@@ -58,6 +59,15 @@ TRIAL ?= 300
 benchmark:
 	uv run python -m tools.ime_benchmark --staging "$(BUILD_DIR)/staging" --output-dir "$(BENCHMARK_DIR)" \
 	  --per-source $(PER_SOURCE) --trial $(TRIAL) --include-review --show 30
+
+HOLDOUT ?= $(BENCHMARK_DIR)/holdout-$(HOLDOUT_SIZE).jsonl
+HOLDOUT_SIZE ?= 3000
+HOLDOUT_SEED ?= 110011
+
+# 验证集：和试跑集（TRIAL 对应的那一份）没有一条相同，抽取方式相同。在试跑集上选出来的规则，要在这里确认不是过拟合
+holdout:
+	uv run python -m tools.holdout --cases "$(BENCHMARK_DIR)/cases.jsonl" --exclude "$(BENCHMARK_DIR)/trial-$(TRIAL).jsonl" \
+	  --size $(HOLDOUT_SIZE) --seed $(HOLDOUT_SEED) --output "$(HOLDOUT)"
 
 # 二字组合至少出现 LEXICON_MIN_COUNT 次才进入词表；词条带拼音，解码器用它判断另一种读法是不是真词
 LEXICON ?= $(BUILD_DIR)/benchmark/lexicon.jsonl
