@@ -82,7 +82,9 @@ class BuildTests(unittest.TestCase):
                 build(staging, sources, root / "out", None, 2, ["clean", "drop"], 52, False, 4, 30, {"mean": 12, "sd": 5}, 4, 2, 1500000, 60)
             manifest = build(staging, sources, root / "out", None, 2, ["clean", "drop"], 52, True, 4, 30, {"mean": 12, "sd": 5}, 4, 2, 1500000, 60)
             read = lambda name: [json.loads(line) for line in (root / "out" / name).read_text(encoding="utf-8").splitlines()]
-            self.assertEqual(manifest["by_source"], {"chat": 4, "news": 4})
+            # Every clause gives a clean case, a drop case and one two-error case.
+            self.assertEqual(manifest["by_source"], {"chat": 6, "news": 6})
+            self.assertEqual(manifest["by_operation"], {"clean": 4, "drop": 4, "x2": 4})
             self.assertEqual(manifest["base"], 4)
             self.assertTrue(all(4 <= len(row["text"]) <= 30 for row in read("base.jsonl")))
             self.assertTrue(all(row["context"] for row in read("base.jsonl") if row["source_id"] == "news"))
@@ -91,7 +93,9 @@ class BuildTests(unittest.TestCase):
             self.assertTrue(all(row["expected"] == {"action": "commit", "text": row["text"]} for row in cases))
             self.assertTrue(all(row["clean_keys"] and row["keys"] for row in cases))
             self.assertEqual(len({row["id"] for row in cases}), len(cases))
-            self.assertEqual(manifest["trial"]["by_source"], {"chat": 2, "news": 2})
+            self.assertTrue(all(len(row["noise_ops"]) == 2 for row in cases if row["id"].endswith("~x2")))
+            self.assertEqual(sum(manifest["trial"]["by_source"].values()), 4)
+            self.assertTrue(set(manifest["trial"]["by_operation"]) <= {"clean", "drop", "x2"})
             self.assertEqual(len(read("trial-4.jsonl")), 4)
             self.assertTrue(list((root / "out" / "shards").glob("*.rejected.jsonl")))
             again = build(staging, sources, root / "out", None, 2, ["clean", "drop"], 52, True, 4, 30, {"mean": 12, "sd": 5}, 4, 2, 1500000, 60)

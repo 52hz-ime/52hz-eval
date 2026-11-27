@@ -172,6 +172,42 @@ def remove_positions(value, positions):
     return "".join(char for index, char in enumerate(value) if index not in removed)
 
 
+# Touch typists alternate hands, so when the hands fall out of step a left-hand letter and the
+# right-hand letter after it can arrive in the other order.
+LEFT_HAND = frozenset("qwertasdfgzxcvb")
+ACCENT_OPERATIONS = ("nasal", "n_l", "retroflex", "f_h")
+KEYSTROKE_OPERATIONS = ("drop", "duplicate", "insert", "neighbor", "swap", "hand_swap")
+COMPOUND_OPERATIONS = KEYSTROKE_OPERATIONS + ACCENT_OPERATIONS
+_SYLLABLES = None
+
+
+def known_syllables():
+    """Toneless syllables known to the pinyin dictionary; an accent change has to stay inside them."""
+    global _SYLLABLES
+    if _SYLLABLES is None:
+        from pypinyin.contrib.tone_convert import to_normal
+        from pypinyin.pinyin_dict import pinyin_dict
+        _SYLLABLES = frozenset(to_normal(item) for readings in pinyin_dict.values() for item in readings.split(","))
+    return _SYLLABLES
+
+
+def accent(operation, syllable):
+    """How a syllable is spelled by a speaker who does not separate two sounds, or None if it does not apply."""
+    if len(syllable) < 2:
+        return None
+    if operation == "nasal":        # en/eng, in/ing, an/ang: the n and ng endings merge either way
+        changed = syllable[:-1] if syllable.endswith("ng") else syllable + "g"
+    elif operation == "n_l":        # n and l as the first sound
+        changed = ("l" if syllable[0] == "n" else "n") + syllable[1:] if syllable[0] in "nl" and syllable != "ng" else None
+    elif operation == "retroflex":  # zh/z, ch/c, sh/s: retroflex initials read as plain ones
+        changed = {"zh": "z", "ch": "c", "sh": "s"}[syllable[:2]] + syllable[2:] if syllable[:2] in ("zh", "ch", "sh") else None
+    elif operation == "f_h":        # f and h
+        changed = ("h" if syllable[0] == "f" else "f") + syllable[1:] if syllable[0] in "fh" else None
+    else:
+        raise ValueError(f"unknown accent operation: {operation}")
+    return changed if changed in known_syllables() and changed != syllable else None
+
+
 def mutate(record, operation, rng):
     keys, editable, syllables = editable_layout(record)
     if not editable:
@@ -201,6 +237,21 @@ def mutate(record, operation, rng):
         position = rng.choice(choices)
         value = keys[:position] + keys[position + 1] + keys[position] + keys[position + 2:]
         return value, {"type": operation, "position": position}
+    if operation == "hand_swap":
+        choices = [position for position in editable if position + 1 in editable and keys[position] != keys[position + 1]
+                   and (keys[position] in LEFT_HAND) != (keys[position + 1] in LEFT_HAND)]
+        if not choices:
+            return None
+        position = rng.choice(choices)
+        value = keys[:position] + keys[position + 1] + keys[position] + keys[position + 2:]
+        return value, {"type": operation, "position": position}
+    if operation in ACCENT_OPERATIONS:
+        choices = [(index, start, end, accent(operation, keys[start:end])) for index, (start, end, _, _) in enumerate(syllables)]
+        choices = [choice for choice in choices if choice[3]]
+        if not choices:
+            return None
+        index, start, end, changed = rng.choice(choices)
+        return keys[:start] + changed + keys[end:], {"type": operation, "syllable": index, "from": keys[start:end], "to": changed}
     if operation == "syllable_swap":
         choices = [(left, right) for left, right in zip(syllables, syllables[1:])
                    if left[2] == right[2] and left[3] + 1 == right[3]]
@@ -223,12 +274,47 @@ def mutate(record, operation, rng):
     raise ValueError(f"unknown noise operation: {operation}")
 
 
+def error_budget(record):
+    """How many syllables of one clause may be mistyped: at least two, about a third of them above that."""
+    count = sum(len(segment["syllables"]) for segment in record["pinyin_segments"] if segment["kind"] == "zh")
+    return max(2, int(0.3 * count + 0.5))
+
+
+def compound(record, count, rng, operations=COMPOUND_OPERATIONS):
+    """Mistype `count` different syllables, one keystroke or accent error in each; None if that is not possible."""
+    keys, _, syllables = editable_layout(record)
+    if len(syllables) < count:
+        return None
+    applied = []
+    for start, end, _, index in sorted(rng.sample(syllables, count), reverse=True):
+        piece = keys[start:end]
+        syllable = {"kind": "zh", "text": piece, "keys": piece, "syllables": [piece]}
+        single = {"keys": piece, "pinyin_segments": [syllable]}
+        # Only errors that can happen to this syllable are drawn, so the count is really reached.
+        possible = [operation for operation in operations if mutate(single, operation, random.Random(0)) is not None]
+        if not possible:
+            continue
+        result = mutate(single, rng.choice(possible), rng)
+        keys = keys[:start] + result[0] + keys[end:]
+        applied.append({**result[1], "syllable": index})
+    if len(applied) != count:
+        return None
+    return keys, sorted(applied, key=lambda item: item["syllable"])
+
+
+def operation_label(noise_ops):
+    """clean, the one operation, or x2/x3 when several syllables were mistyped at once."""
+    if not noise_ops:
+        return "clean"
+    return noise_ops[0]["type"] if len(noise_ops) == 1 else f"x{len(noise_ops)}"
+
+
 def stable_seed(seed, record_id, operation):
     digest = hashlib.sha256(f"{seed}\0{record_id}\0{operation}".encode()).digest()
     return int.from_bytes(digest[:8], "big")
 
 
-def noise_cases(rows, operations, seed=52, limit=None, include_review=False):
+def noise_cases(rows, operations, seed=52, limit=None, include_review=False, multi=False):
     count = 0
     for row in rows:
         if row.get("quality_policy") in REVIEW_POLICIES and not include_review:
@@ -248,6 +334,16 @@ def noise_cases(rows, operations, seed=52, limit=None, include_review=False):
             count += 1
             if limit and count >= limit:
                 return
+        if multi:
+            # One variant per error count up to the budget, so accuracy can be read against how many errors there are.
+            for errors in range(2, error_budget(row) + 1):
+                result = compound(row, errors, random.Random(stable_seed(seed, row["id"], f"x{errors}")))
+                if result is None:
+                    continue
+                yield {**base, "id": f"{row['id']}~x{errors}", "keys": result[0], "noise_ops": result[1]}
+                count += 1
+                if limit and count >= limit:
+                    return
 
 
 def write_pinyin(input_path, output_path, min_chars, max_chars, limit, manifest):
@@ -266,8 +362,8 @@ def write_pinyin(input_path, output_path, min_chars, max_chars, limit, manifest)
     return count
 
 
-def write_noise(input_path, output_path, operations, seed, limit, manifest, include_review=False):
-    rows = noise_cases(read_jsonl(input_path), operations, seed, limit, include_review)
+def write_noise(input_path, output_path, operations, seed, limit, manifest, include_review=False, multi=False):
+    rows = noise_cases(read_jsonl(input_path), operations, seed, limit, include_review, multi)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     counts = Counter()
@@ -279,7 +375,7 @@ def write_noise(input_path, output_path, operations, seed, limit, manifest, incl
         write_json(manifest, {"operation": "noise", "input": str(input_path), "output": str(output_path),
                               "operations": operations, "seed": seed, "records": sum(counts.values()),
                               "by_operation": dict(sorted(counts.items())), "include_review": include_review,
-                              "generator_version": GENERATOR_VERSION})
+                              "generator_version": GENERATOR_VERSION, "multi": multi})
     return sum(counts.values())
 
 
@@ -302,6 +398,8 @@ def main(argv=None):
     noise.add_argument("--manifest", type=Path)
     noise.add_argument("--include-review", action="store_true",
                        help="include manual_review and mixed_review records for exploratory output")
+    noise.add_argument("--multi", action="store_true",
+                       help="also mistype 2 up to the budget of syllables at once, one variant per error count")
     args = parser.parse_args(argv)
     try:
         if args.command == "pinyin":
@@ -309,7 +407,7 @@ def main(argv=None):
         else:
             operations = [item.strip() for item in args.operations.split(",") if item.strip()]
             count = write_noise(args.input, args.output, operations, args.seed, args.limit, args.manifest,
-                                args.include_review)
+                                args.include_review, args.multi)
         print(json.dumps({"output": str(args.output), "records": count}, ensure_ascii=False))
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
         parser.exit(2, f"{error}\n")

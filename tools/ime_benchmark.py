@@ -20,14 +20,16 @@ from pathlib import Path
 
 from tools.benchmark_pipeline import canonical_digest, digest_file, input_signature
 from tools.corpus_workflow import EXTRACTOR_VERSION, expand_jsonl_inputs, load_index, read_jsonl, stable_id, write_json, write_jsonl
-from tools.pinyin_cases import GENERATOR_VERSION, convert, noise_cases
+from tools.pinyin_cases import GENERATOR_VERSION, convert, noise_cases, operation_label
 from tools import quality_filter
 from tools.quality_filter import FILTER_VERSION, classify
 
 
 BENCHMARK_VERSION = "0.1.0"
-# Losing the very first keystroke and swapping two whole syllables are rare in daily typing, so neither is a benchmark operation.
-OPERATIONS = ["clean", "drop", "duplicate", "insert", "neighbor", "swap", "truncate_suffix"]
+# Every error a typist makes is one of these: a keystroke slips, the two hands fall out of step, or a sound is
+# merged (en/eng, n/l, retroflex, f/h). Losing the first keystroke and swapping whole syllables are left out as rare.
+OPERATIONS = ["clean", "drop", "duplicate", "insert", "neighbor", "swap", "hand_swap", "truncate_suffix",
+              "nasal", "n_l", "retroflex", "f_h"]
 CLOSER_TEXT = "”’）》」』〕】〉"
 BOUNDARY = re.compile(rf"([，。！？；…]+[{CLOSER_TEXT}]*|(?<=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])[,;!?]+[{CLOSER_TEXT}]*)")
 CLAUSE_MARK = re.compile(r"[，。！？；…]")
@@ -63,7 +65,7 @@ def follows(previous, row):
 
 
 def operation_of(case):
-    return case["noise_ops"][0]["type"] if case["noise_ops"] else "clean"
+    return operation_label(case.get("noise_ops"))
 
 
 def scan_file(path, min_chars, max_chars, shards, context_chars, rejected_rate, seed):
@@ -225,7 +227,7 @@ def build(staging, sources_file, output_dir, sources, per_source, operations, se
         keys, segments = convert(row["text"])
         if any(segment["kind"] == "zh" for segment in segments):
             keyed.append({**row, "keys": keys, "pinyin_segments": segments, "pinyin_version": GENERATOR_VERSION})
-    cases = list(noise_cases(keyed, operations, seed, include_review=True))
+    cases = list(noise_cases(keyed, operations, seed, include_review=True, multi=True))
     rng.shuffle(cases)
     write_jsonl(output_dir / "base.jsonl", keyed)
     write_jsonl(output_dir / "cases.jsonl", cases)
@@ -233,6 +235,7 @@ def build(staging, sources_file, output_dir, sources, per_source, operations, se
                 "seed": seed, "include_review": include_review, "sources": sources, "operations": operations,
                 "min_chars": min_chars, "max_chars": max_chars, "length_target": length,
                 "context_chars": context_chars, "per_source": per_source,
+                "error_budget": "at least 2 syllables, about a third of them above that; one variant per error count",
                 "base": len(keyed), "cases": len(cases), **length_stats([len(row["text"]) for row in keyed]),
                 "by_source": dict(sorted(Counter(row["source_id"] for row in cases).items())),
                 "by_operation": dict(sorted(Counter(operation_of(row) for row in cases).items())),

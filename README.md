@@ -178,8 +178,8 @@ uv run 52hz-pinyin noise \
 `make benchmark` 从整个 staging 树构建各来源等量的 benchmark，默认写到 `/data/52hz-eval/build/benchmark/iteration-003/`：
 
 ```sh
-make benchmark                       # 每个来源 1000 条基础子句，另抽 100 条试跑小集
-make benchmark PER_SOURCE=300 TRIAL=0 BENCHMARK_DIR=/data/52hz-eval/build/benchmark/try-004
+make benchmark                       # 每个来源 1000 条基础子句，另抽 300 条试跑小集
+make benchmark PER_SOURCE=300 TRIAL=100 BENCHMARK_DIR=/data/52hz-eval/build/benchmark/try-004
 ```
 
 处理步骤：
@@ -189,14 +189,20 @@ make benchmark PER_SOURCE=300 TRIAL=0 BENCHMARK_DIR=/data/52hz-eval/build/benchm
 3. **各来源等量采样。** 长度按目标正态分布加权（默认均值 12、标准差 5），实际分布写在 `manifest.json` 的 `lengths` 里。
 4. **上文取两行。** 记录 `context` 的最后一行（对话的上一轮、新闻的标题），加上同一个文档里的前一个子句，各至多 60 字；不传完整对话历史。
 
+噪声分三类，每条子句每种各生成一个变体：
+
+- **按键错误**：`drop` 漏按、`duplicate` 多按、`insert` 多按一个相邻键、`neighbor` 按成相邻键、`swap` 相邻两个字母颠倒、`hand_swap` 左右手不同步（左右手的两个相邻字母颠倒）、`truncate_suffix` 句尾字母没打完。
+- **口音合并**：`nasal`（en/eng、in/ing、an/ang 互相不分）、`n_l`、`retroflex`（zh/z、ch/c、sh/s）、`f_h`。变换后的音节仍然是合法拼音。
+- **多错**：`x2`、`x3`，不同的音节各错一处。额度是 `max(2, round(0.3 × 音节数))`，10 个音节容 3 个；每个错误数生成一个变体，所以评分可以按错误个数看。
+
 对话来源仍是 `manual_review` / `mixed_review`，所以 `make benchmark` 显式带 `--include-review`。直接运行命令而不带它时，只要选中的来源里有待审核的，就会报错退出，不会悄悄只剩一个来源。
 
 产物：
 
 ```text
 base.jsonl        抽中的基础子句及其拼音
-cases.jsonl       基础子句 × 噪声操作，字段和之前的 cases.jsonl 相同；默认 7 种操作：
-                  clean、drop、duplicate、insert、neighbor、swap、truncate_suffix
+cases.jsonl       基础子句 × 噪声操作，字段和之前的 cases.jsonl 相同
+trial-300.jsonl   按来源 × 噪声类型轮流抽取的试跑小集（TRIAL=300）
 trial-100.jsonl   按来源 × 操作轮流抽取的试跑小集
 manifest.json     来源、操作、长度分布、被各条规则拦截的数量
 shards/           每个来源的扫描缓存；staging、过滤规则和切分规则不变时直接复用

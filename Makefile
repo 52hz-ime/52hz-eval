@@ -16,7 +16,7 @@ help:
 	  'make clean     删除 DATA_ROOT/build 生成物，不删除 raw 语料' \
 	  'make pinyin    clean JSONL 转拼音（CLEAN_INPUT=...）' \
 	  'make noise     从拼音记录生成噪声 cases（PINYIN_INPUT=...）' \
-	  'make benchmark [PER_SOURCE=1000] [TRIAL=100]  各来源等量采样子句级 IME benchmark（含试跑小集）' \
+	  'make benchmark [PER_SOURCE=1000] [TRIAL=300]  各来源等量采样子句级 IME benchmark（含试跑小集）' \
 	  'make lexicon   从 benchmark 的通过池统计二字词表，供解码器判断追问' \
 	  'make test      运行 workflow 离线测试' \
 	  'python3 -m tools.corpus_workflow run --config data/pipeline.example.json'
@@ -52,7 +52,7 @@ quality:
 
 BENCHMARK_DIR ?= $(BUILD_DIR)/benchmark/iteration-003
 PER_SOURCE ?= 1000
-TRIAL ?= 100
+TRIAL ?= 300
 
 # 各来源等量、按逗号句号切成子句、按目标长度分布加权；对话来源尚未人工审核，所以显式 --include-review
 benchmark:
